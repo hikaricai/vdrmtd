@@ -9,13 +9,13 @@ fn main() {
     .unwrap();
     let context = window.gl();
 
-    // 1. 初始化相机
-    let mut camera = Camera::new_perspective(
+    // 1. 初始化相机 (使用正交相机，消除透视形变)
+    let mut camera = Camera::new_orthographic(
         window.viewport(),
         vec3(0.0, 0.0, 2.5),
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
-        degrees(45.0),
+        2.5, // height: 因为球体直径是 2.0，所以视野高度设置为 2.5 就能完整包裹球体
         0.1,
         10.0,
     );
@@ -109,13 +109,16 @@ fn main() {
                     if z_raw >= 0.9999 {
                         h_data.push(0);
                     } else {
-                        let z_ndc = z_raw * 2.0 - 1.0;
-                        let z_linear = (2.0 * near * far) / (far + near - z_ndc * (far - near));
+                        // 对于正交相机，深度 z_raw (0.0 到 1.0) 与真实的线性深度是正向的直接线性关系
+                        // z_raw = 0.0 对应 near 面，z_raw = 1.0 对应 far 面
+                        let z_linear = near + z_raw * (far - near);
                         
                         // 动态归一化：球体最靠近相机的点映射为 255 (白)，最远点映射为 0 (黑)
-                        // 注意：这里如果像素的深度比模型的包围盒还要近（比如突出的坐标轴），会超界，使用 clamp 截断即可
                         let normalized_depth = (z_linear - min_z) / (max_z - min_z);
-                        let h_val = (255.0 * (1.0 - normalized_depth)).clamp(0.0, 255.0) as u8;
+                        
+                        // 为了保证球的边缘 (即深度刚好在 min_z 和 max_z 的正中间时) 值为 128
+                        // 127.5 需要四舍五入
+                        let h_val = (255.0 * (1.0 - normalized_depth)).round().clamp(0.0, 255.0) as u8;
                         
                         h_data.push(h_val);
                     }
