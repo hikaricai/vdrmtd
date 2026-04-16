@@ -16,8 +16,8 @@ fn main() {
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
         degrees(45.0),
-        1.5,
-        2.5,
+        0.1,
+        10.0,
     );
     let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
 
@@ -32,8 +32,17 @@ fn main() {
     );
     let model = Gm::new(mesh, material);
 
+    // 打印模型的包围盒(AABB)范围
+    let aabb = model.aabb();
+    println!("Model AABB Min: {:?}", aabb.min());
+    println!("Model AABB Max: {:?}", aabb.max());
+    println!("Model Size: {:?}", aabb.size());
+
     let ambient = AmbientLight::new(&context, 0.5, Srgba::WHITE);
     let directional = DirectionalLight::new(&context, 2.0, Srgba::WHITE, &vec3(-1.0, -1.0, -1.0));
+
+    // 创建坐标轴
+    let axes = Axes::new(&context, 0.05, 2.0);
 
     // 3. 渲染循环
     window.render_loop(move |mut frame_input| {
@@ -45,7 +54,7 @@ fn main() {
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
-            .render(&camera, &model, &[&ambient, &directional]);
+            .render(&camera, model.into_iter().chain(&axes), &[&ambient, &directional]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
@@ -60,35 +69,85 @@ fn main() {
                 // 计算线性深度 (H)
                 let near = camera.z_near();
                 let far = camera.z_far();
-                let mut h_data = Vec::with_capacity(depth_values.len());
+                
+                // --- 计算模型在当前视角下的准确深度范围 ---
+                let view_matrix = camera.view();
+                let min_pos = aabb.min();
+                let max_pos = aabb.max();
+                // 提取 AABB 的 8 个顶点
+                let corners = [
+                    vec3(min_pos.x, min_pos.y, min_pos.z),
+                    vec3(min_pos.x, min_pos.y, max_pos.z),
+                    vec3(min_pos.x, max_pos.y, min_pos.z),
+                    vec3(min_pos.x, max_pos.y, max_pos.z),
+                    vec3(max_pos.x, min_pos.y, min_pos.z),
+                    vec3(max_pos.x, min_pos.y, max_pos.z),
+                    vec3(max_pos.x, max_pos.y, min_pos.z),
+                    vec3(max_pos.x, max_pos.y, max_pos.z),
+                ];
 
+                let mut min_z = f32::MAX;
+                let mut max_z = f32::MIN;
+
+                for corner in &corners {
+                    // 转换到相机视图空间 (View Space)
+                    let view_pos = view_matrix * corner.extend(1.0);
+                    // 在右手坐标系中，相机看向 -Z 轴，所以深度是 -view_pos.z
+                    let depth = -view_pos.z;
+                    if depth < min_z { min_z = depth; }
+                    if depth > max_z { max_z = depth; }
+                }
+
+                // 防止除 0
+                if max_z - min_z < 1e-5 {
+                    max_z = min_z + 1.0;
+                }
+
+                // 利用模型自身的 min_z 和 max_z 将深度归一化到 0-255
+                let mut h_data = Vec::with_capacity(depth_values.len());
                 for &z_raw in depth_values.iter() {
-                    // 如果 z_raw 已经是 1.0 (远裁剪面，背景)，直接输出黑色
                     if z_raw >= 0.9999 {
                         h_data.push(0);
-                        continue;
+                    } else {
+                        let z_ndc = z_raw * 2.0 - 1.0;
+                        let z_linear = (2.0 * near * far) / (far + near - z_ndc * (far - near));
+                        
+                        // 动态归一化：球体最靠近相机的点映射为 255 (白)，最远点映射为 0 (黑)
+                        // 注意：这里如果像素的深度比模型的包围盒还要近（比如突出的坐标轴），会超界，使用 clamp 截断即可
+                        let normalized_depth = (z_linear - min_z) / (max_z - min_z);
+                        let h_val = (255.0 * (1.0 - normalized_depth)).clamp(0.0, 255.0) as u8;
+                        
+                        h_data.push(h_val);
                     }
-
-                    // OpenGL 的 z_raw 在 [0.0, 1.0] 范围内，反算到 NDC [-1.0, 1.0]
-                    let z_ndc = z_raw * 2.0 - 1.0;
-                    
-                    // 透视投影还原为线性深度 (视图空间下的距离)
-                    let z_linear = (2.0 * near * far) / (far + near - z_ndc * (far - near));
-
-                    // 映射到 0-255 (近处白 255，远处黑 0)
-                    // 使用 clamp 防止越界，保证只在这个范围内做灰度过渡
-                    let normalized_depth = (z_linear - near) / (far - near);
-                    let h_val = (255.0 * (1.0 - normalized_depth)).clamp(0.0, 255.0) as u8;
-                    
-                    h_data.push(h_val);
                 }
 
                 save_rgbh(viewport.width, viewport.height, &pixels, &h_data);
-                println!(">>> RGBH 图片已生成！");
+                // 添加采样保存深度的调用 (这里步长选 16，保证文本宽度适中)
+                save_depth_txt(viewport.width, viewport.height, &h_data, 16);
+                println!(">>> RGBH 图片和 txt 深度采样已生成！");
             }
         }
         FrameOutput::default()
     });
+}
+
+// 将深度图采样输出为 txt 文件
+fn save_depth_txt(w: u32, h: u32, h_raw: &[u8], step: usize) {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut file = File::create("output_depth.txt").unwrap();
+    // 按照指定的步长 step 遍历高和宽
+    for y in (0..h).step_by(step) {
+        for x in (0..w).step_by(step) {
+            // OpenGL 屏幕坐标系原点在左下角，这里转成左上角原点，与图像像素保持一致
+            let src_idx = ((h - 1 - y) * w + x) as usize;
+            let d = h_raw[src_idx];
+            // 格式化为固定 3 位的数字
+            write!(file, "{:3} ", d).unwrap();
+        }
+        writeln!(file).unwrap();
+    }
 }
 
 fn save_rgbh(w: u32, h: u32, rgb_raw: &[[u8; 4]], h_raw: &[u8]) {
