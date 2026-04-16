@@ -3,7 +3,7 @@ use three_d::*;
 fn main() {
     let window = Window::new(WindowSettings {
         title: "RGBH Capture Tool".to_string(),
-        max_size: Some((1280, 720)),
+        max_size: Some((720, 720)),
         ..Default::default()
     })
     .unwrap();
@@ -12,14 +12,14 @@ fn main() {
     // 1. 初始化相机
     let mut camera = Camera::new_perspective(
         window.viewport(),
-        vec3(3.0, 3.0, 5.0),
+        vec3(0.0, 0.0, 2.5),
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
         degrees(45.0),
-        0.1,
-        20.0,
+        1.5,
+        2.5,
     );
-    let mut control = OrbitControl::new(*camera.target(), 1.0, 50.0);
+    let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
 
     // 2. 创建模型 (使用 Gm 和 Mesh)
     let mesh = Mesh::new(&context, &CpuMesh::sphere(32));
@@ -63,13 +63,23 @@ fn main() {
                 let mut h_data = Vec::with_capacity(depth_values.len());
 
                 for &z_raw in depth_values.iter() {
-                    // GPU 深度还原公式
+                    // 如果 z_raw 已经是 1.0 (远裁剪面，背景)，直接输出黑色
+                    if z_raw >= 0.9999 {
+                        h_data.push(0);
+                        continue;
+                    }
+
+                    // OpenGL 的 z_raw 在 [0.0, 1.0] 范围内，反算到 NDC [-1.0, 1.0]
                     let z_ndc = z_raw * 2.0 - 1.0;
+                    
+                    // 透视投影还原为线性深度 (视图空间下的距离)
                     let z_linear = (2.0 * near * far) / (far + near - z_ndc * (far - near));
 
                     // 映射到 0-255 (近处白 255，远处黑 0)
-                    let h_val =
-                        (255.0 * (1.0 - (z_linear - near) / (far - near))).clamp(0.0, 255.0) as u8;
+                    // 使用 clamp 防止越界，保证只在这个范围内做灰度过渡
+                    let normalized_depth = (z_linear - near) / (far - near);
+                    let h_val = (255.0 * (1.0 - normalized_depth)).clamp(0.0, 255.0) as u8;
+                    
                     h_data.push(h_val);
                 }
 
