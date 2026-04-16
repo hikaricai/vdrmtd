@@ -23,7 +23,8 @@ fn main() {
 
     // 2. 创建模型 (使用 Gm 和 Mesh)
     let mesh = Mesh::new(&context, &CpuMesh::sphere(32));
-    let material = PhysicalMaterial::new_opaque(
+    // 使用 ColorMaterial (无光照材质)，让模型每个地方都一样亮
+    let material = ColorMaterial::new_opaque(
         &context,
         &CpuMaterial {
             albedo: Srgba::new_opaque(0, 150, 255),
@@ -38,9 +39,6 @@ fn main() {
     println!("Model AABB Max: {:?}", aabb.max());
     println!("Model Size: {:?}", aabb.size());
 
-    let ambient = AmbientLight::new(&context, 0.5, Srgba::WHITE);
-    let directional = DirectionalLight::new(&context, 2.0, Srgba::WHITE, &vec3(-1.0, -1.0, -1.0));
-
     // 创建坐标轴
     let axes = Axes::new(&context, 0.05, 2.0);
 
@@ -54,7 +52,8 @@ fn main() {
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
-            .render(&camera, model.into_iter().chain(&axes), &[&ambient, &directional]);
+            // 传入空的光源数组 &[]，因为 ColorMaterial 不需要光照
+            .render(&camera, model.into_iter().chain(&axes), &[]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
