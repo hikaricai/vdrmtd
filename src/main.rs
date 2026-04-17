@@ -68,57 +68,50 @@ fn main() {
                 // 计算线性深度 (H)
                 let near = camera.z_near();
                 let far = camera.z_far();
+
+                // --- 移除通过 AABB 顶点转换求深度的逻辑 ---
+                // 因为如果将世界空间中的 AABB 转到相机空间，随着相机旋转，AABB 的投影在深度方向会拉长（对角线最长可达 2*sqrt(3)）
+                // 这会导致 min_z 和 max_z 发生改变，从而使得归一化深度随视角变化，边缘不再是 128！
+
+                // --- 采用固定相机空间深度的逻辑 ---
+                // 无论相机怎么转，我们希望捕捉的内容永远是位于相机正前方距离 target(原点) 为中心的 2x2x2 方块！
+                // 因为相机目前到 target (0,0,0) 的距离永远是 2.5
+                // 所以方块的前表面(最近点) 距离相机永远是 2.5 - 1.0 = 1.5
+                // 方块的后表面(最远点) 距离相机永远是 2.5 + 1.0 = 3.5
+                // (注意：这里使用相机的距离，而不是去读取 OrbitControl 内部状态，保持简单直接)
+                let distance_to_target = 2.5; // 初始化时我们设置了相机位置 vec3(0,0,2.5) 看向 0,0,0
                 
-                // --- 计算模型在当前视角下的准确深度范围 ---
-                let view_matrix = camera.view();
-                let min_pos = aabb.min();
-                let max_pos = aabb.max();
-                // 提取 AABB 的 8 个顶点
-                let corners = [
-                    vec3(min_pos.x, min_pos.y, min_pos.z),
-                    vec3(min_pos.x, min_pos.y, max_pos.z),
-                    vec3(min_pos.x, max_pos.y, min_pos.z),
-                    vec3(min_pos.x, max_pos.y, max_pos.z),
-                    vec3(max_pos.x, min_pos.y, min_pos.z),
-                    vec3(max_pos.x, min_pos.y, max_pos.z),
-                    vec3(max_pos.x, max_pos.y, min_pos.z),
-                    vec3(max_pos.x, max_pos.y, max_pos.z),
-                ];
+                // 我们固定的体积显示器捕获深度范围：
+                let min_z = distance_to_target - 1.0;
+                let max_z = distance_to_target + 1.0;
 
-                let mut min_z = f32::MAX;
-                let mut max_z = f32::MIN;
-
-                for corner in &corners {
-                    // 转换到相机视图空间 (View Space)
-                    let view_pos = view_matrix * corner.extend(1.0);
-                    // 在右手坐标系中，相机看向 -Z 轴，所以深度是 -view_pos.z
-                    let depth = -view_pos.z;
-                    if depth < min_z { min_z = depth; }
-                    if depth > max_z { max_z = depth; }
-                }
-
-                // 防止除 0
-                if max_z - min_z < 1e-5 {
-                    max_z = min_z + 1.0;
-                }
-
+                let mut min_z_raw = f32::MAX;
+                let mut max_z_raw = f32::MIN;
                 // 利用模型自身的 min_z 和 max_z 将深度归一化到 0-255
                 let mut h_data = Vec::with_capacity(depth_values.len());
                 for &z_raw in depth_values.iter() {
                     if z_raw >= 0.9999 {
                         h_data.push(0);
                     } else {
-                        // 对于正交相机，深度 z_raw (0.0 到 1.0) 与真实的线性深度是正向的直接线性关系
+                        // 记录原始深度范围
+                        if z_raw < min_z_raw {
+                            min_z_raw = z_raw;
+                        }
+                        if z_raw > max_z_raw {
+                            max_z_raw = z_raw;
+                        }
+                        // 对于正交相机，深度 z_raw (0.0 到 1.0) 与真实的线性深度_raw深度_raw (0.0 到 1.0) 与真实的线性深度是正向的直接线性关系
                         // z_raw = 0.0 对应 near 面，z_raw = 1.0 对应 far 面
                         let z_linear = near + z_raw * (far - near);
-                        
+
                         // 动态归一化：球体最靠近相机的点映射为 255 (白)，最远点映射为 0 (黑)
                         let normalized_depth = (z_linear - min_z) / (max_z - min_z);
-                        
+
                         // 为了保证球的边缘 (即深度刚好在 min_z 和 max_z 的正中间时) 值为 128
                         // 127.5 需要四舍五入
-                        let h_val = (255.0 * (1.0 - normalized_depth)).round().clamp(0.0, 255.0) as u8;
-                        
+                        let h_val =
+                            (255.0 * (1.0 - normalized_depth)).round().clamp(0.0, 255.0) as u8;
+
                         h_data.push(h_val);
                     }
                 }
@@ -127,6 +120,9 @@ fn main() {
                 // 添加采样保存深度的调用 (这里步长选 16，保证文本宽度适中)
                 save_depth_txt(viewport.width, viewport.height, &h_data, 16);
                 println!(">>> RGBH 图片和 txt 深度采样已生成！");
+                println!("(min_z, max_z): {:?}", (min_z, max_z));
+                println!("(near, far): {:?}", (near, far));
+                println!("(min_z_raw, max_z_raw): {:?}", (min_z_raw, max_z_raw));
             }
         }
         FrameOutput::default()
