@@ -42,16 +42,52 @@ fn main() {
     // 创建坐标轴
     let axes = Axes::new(&context, 0.05, 2.0);
 
+    // 用于记录模型当前的累积旋转和按键状态
+    let mut rotation = Mat4::identity();
+    let mut keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
+
     // 3. 渲染循环
     window.render_loop(move |mut frame_input| {
         let viewport = frame_input.viewport;
         camera.set_viewport(viewport);
         control.handle_events(&mut camera, &mut frame_input.events);
 
-        // 让模型绕 Y 轴持续旋转 (根据时间变化)
-        let time = frame_input.accumulated_time;
-        // 使用 set_transformation 设置模型的世界变换矩阵，绕 Y 轴旋转
-        model.set_transformation(Mat4::from_angle_y(radians(time as f32 * 0.001)));
+        // --- 收集按键状态 ---
+        for event in frame_input.events.iter() {
+            match event {
+                Event::KeyPress { kind, .. } => {
+                    keys.insert(*kind);
+                }
+                Event::KeyRelease { kind, .. } => {
+                    keys.remove(kind);
+                }
+                _ => {}
+            }
+        }
+
+        // --- 根据按键状态计算当前帧的“局部旋转增量” ---
+        let speed = 100.0 * frame_input.elapsed_time as f32 / 1000.0; // 约每秒 100 度的旋转速度
+
+        let mut d_pitch = 0.0_f32;
+        let mut d_yaw = 0.0_f32;
+        let mut d_roll = 0.0_f32;
+
+        if keys.contains(&Key::W) { d_pitch += speed; } // 机头向上 (绕局部 X 轴)
+        if keys.contains(&Key::S) { d_pitch -= speed; } // 机头向下
+        if keys.contains(&Key::A) { d_yaw -= speed; }   // 机头向左 (绕局部 Y 轴)
+        if keys.contains(&Key::D) { d_yaw += speed; }   // 机头向右
+        if keys.contains(&Key::Q) { d_roll += speed; }  // 左倾翻滚 (绕局部 Z 轴)
+        if keys.contains(&Key::E) { d_roll -= speed; }  // 右倾翻滚
+
+        // 构造当前帧的局部旋转矩阵
+        let delta_rot = Mat4::from_angle_y(degrees(d_yaw))
+            * Mat4::from_angle_x(degrees(d_pitch))
+            * Mat4::from_angle_z(degrees(d_roll));
+
+        // 将局部旋转累加到模型的总旋转中 
+        // (右乘 delta_rot 表示基于当前的局部坐标轴继续旋转，而不是基于世界的固定坐标轴)
+        rotation = rotation * delta_rot;
+        model.set_transformation(rotation);
 
         // 渲染到屏幕
         let screen = frame_input.screen();
