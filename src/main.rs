@@ -15,23 +15,23 @@ fn main() {
         vec3(0.0, 0.0, 2.5),
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
-        2.5, // height: 因为球体直径是 2.0，所以视野高度设置为 2.5 就能完整包裹球体
+        5., // height: 因为球体直径是 2.0，所以视野高度设置为 2.5 就能完整包裹球体
         0.1,
         10.0,
     );
     let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
 
     // 2. 创建模型 (使用 Gm 和 Mesh)
-    let mesh = Mesh::new(&context, &CpuMesh::sphere(32));
+    let mesh = Mesh::new(&context, &CpuMesh::cube());
     // 使用 ColorMaterial (无光照材质)，让模型每个地方都一样亮
     let material = ColorMaterial::new_opaque(
         &context,
         &CpuMaterial {
-            albedo: Srgba::new_opaque(0, 150, 255),
+            albedo: Srgba::new_opaque(0, 150, 150),
             ..Default::default()
         },
     );
-    let model = Gm::new(mesh, material);
+    let mut model = Gm::new(mesh, material);
 
     // 打印模型的包围盒(AABB)范围
     let aabb = model.aabb();
@@ -48,12 +48,18 @@ fn main() {
         camera.set_viewport(viewport);
         control.handle_events(&mut camera, &mut frame_input.events);
 
+        // 让模型绕 Y 轴持续旋转 (根据时间变化)
+        let time = frame_input.accumulated_time;
+        // 使用 set_transformation 设置模型的世界变换矩阵，绕 Y 轴旋转
+        model.set_transformation(Mat4::from_angle_y(radians(time as f32 * 0.001)));
+
         // 渲染到屏幕
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
             // 传入空的光源数组 &[]，因为 ColorMaterial 不需要光照
             .render(&camera, model.into_iter().chain(&axes), &[]);
+            // .render(&camera, model.into_iter(), &[]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
