@@ -39,6 +39,19 @@ fn main() {
     println!("Model AABB Max: {:?}", aabb.max());
     println!("Model Size: {:?}", aabb.size());
 
+    // 添加一个平面正方形，默认 CpuMesh::square() 边长为 2.0 (halfsize=1.0)
+    // 缩放 0.5 使得边长为 1.0
+    let mut sq_mesh = CpuMesh::square();
+    sq_mesh.transform(&Mat4::from_scale(0.5)).unwrap();
+    let sq_material = ColorMaterial::new_transparent(
+        &context,
+        &CpuMaterial {
+            albedo: Srgba::new(255, 50, 50, 128), // 半透明红色 (alpha: 128)
+            ..Default::default()
+        },
+    );
+    let mut square = Gm::new(Mesh::new(&context, &sq_mesh), sq_material);
+
     // 创建坐标轴
     let axes = Axes::new(&context, 0.05, 2.0);
 
@@ -88,14 +101,16 @@ fn main() {
         // (右乘 delta_rot 表示基于当前的局部坐标轴继续旋转，而不是基于世界的固定坐标轴)
         rotation = rotation * delta_rot;
         model.set_transformation(rotation);
+        // 让正方形跟随模型一起旋转，但稍微向 Z 轴正向偏移一点，以免被完全埋在中间
+        square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
 
         // 渲染到屏幕
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
             // 传入空的光源数组 &[]，因为 ColorMaterial 不需要光照
-            .render(&camera, model.into_iter().chain(&axes), &[]);
-            // .render(&camera, model.into_iter(), &[]);
+            // .render(&camera, model.into_iter().chain(&axes), &[]);
+            .render(&camera, model.into_iter().chain(&square), &[]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
