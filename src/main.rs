@@ -1,5 +1,74 @@
 use three_d::*;
 
+fn create_lines(
+    context: &Context,
+    paths: &[Vec<(f32, f32, f32)>],
+    thickness: f32,
+    color: Srgba,
+) -> Gm<InstancedMesh, ColorMaterial> {
+    let mut transformations = Vec::new();
+    for path in paths {
+        for window in path.windows(2) {
+            let p0 = vec3(window[0].0, window[0].1, window[0].2);
+            let p1 = vec3(window[1].0, window[1].1, window[1].2);
+            let dir = p1 - p0;
+            let length = dir.magnitude();
+            if length > 0.0001 {
+                let dir_n = dir / length;
+                // 计算从 X 轴正向到 dir_n 的旋转
+                let rot = Quat::from_arc(
+                    vec3(1.0, 0.0, 0.0),
+                    dir_n,
+                    Some(vec3(0.0, 1.0, 0.0)),
+                );
+                let transform = Mat4::from_translation(p0)
+                    * Mat4::from(rot)
+                    * Mat4::from_nonuniform_scale(length, thickness, thickness);
+                transformations.push(transform);
+            }
+        }
+    }
+
+    let instances = Instances {
+        transformations,
+        ..Default::default()
+    };
+
+    let mesh = InstancedMesh::new(context, &instances, &CpuMesh::cylinder(16));
+    let material = ColorMaterial::new_opaque(
+        context,
+        &CpuMaterial {
+            albedo: color,
+            ..Default::default()
+        },
+    );
+    Gm::new(mesh, material)
+}
+
+fn virtual_boards() -> Vec<Vec<(f32, f32, f32)>> {
+    let screen: vdrm_alg::Screen = vdrm_alg::screens()[1];
+    let angle_s = 90f32 - 22.5f32;
+    let angle_e = 90f32 + 22.5f32;
+    let mut screen_s = vdrm_alg::mirror_points_f(angle_s.to_radians(), &screen.points);
+    screen_s.push(screen_s[0]);
+    let mut screen_e = vdrm_alg::mirror_points_f(angle_e.to_radians(), &screen.points);
+    screen_e.push(screen_e[0]);
+
+    let num_points = 10;
+    let mut boards = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+
+    for i in 0..num_points {
+        let angle = angle_s + (angle_e - angle_s) * (i as f32) / ((num_points - 1) as f32);
+        let points = vdrm_alg::mirror_points_f(angle.to_radians(), &screen.points);
+        let points: [(f32, f32, f32); 4] = points.try_into().unwrap();
+        for (board, p) in boards.iter_mut().zip(points) {
+            board.push(p);
+        }
+    }
+    boards.extend([screen_s, screen_e]);
+    boards
+}
+
 fn main() {
     let window = Window::new(WindowSettings {
         title: "RGBH Capture Tool".to_string(),
@@ -55,6 +124,15 @@ fn main() {
     // 创建坐标轴
     let axes = Axes::new(&context, 0.05, 2.0);
 
+    // 获取并创建虚拟板的线条模型
+    let board_paths = virtual_boards();
+    let mut boards_model = create_lines(
+        &context,
+        &board_paths,
+        0.01, // 线条粗细
+        Srgba::new_opaque(0, 255, 0), // 绿色线条
+    );
+
     // 用于记录模型当前的累积旋转和按键状态
     let mut rotation = Mat4::identity();
     let mut keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
@@ -103,14 +181,16 @@ fn main() {
         model.set_transformation(rotation);
         // 让正方形跟随模型一起旋转，但稍微向 Z 轴正向偏移一点，以免被完全埋在中间
         square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
+        // 让虚拟板的线条跟随旋转
+        boards_model.set_transformation(rotation);
 
         // 渲染到屏幕
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
             // 传入空的光源数组 &[]，因为 ColorMaterial 不需要光照
-            // .render(&camera, model.into_iter().chain(&axes), &[]);
-            .render(&camera, model.into_iter().chain(&square), &[]);
+            .render(&camera, model.into_iter().chain(&boards_model).chain(&axes), &[]);
+            // .render(&camera, model.into_iter().chain(&square).chain(&boards_model), &[]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
