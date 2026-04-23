@@ -49,10 +49,8 @@ fn virtual_boards() -> Vec<Vec<(f32, f32, f32)>> {
     let screen: vdrm_alg::Screen = vdrm_alg::screens()[1];
     let angle_s = 90f32 - 22.5f32;
     let angle_e = 90f32 + 22.5f32;
-    let mut screen_s = vdrm_alg::mirror_points_f(angle_s.to_radians(), &screen.points);
-    screen_s.push(screen_s[0]);
-    let mut screen_e = vdrm_alg::mirror_points_f(angle_e.to_radians(), &screen.points);
-    screen_e.push(screen_e[0]);
+    let screen_s = vdrm_alg::mirror_points_f(angle_s.to_radians(), &screen.points);
+    let screen_e = vdrm_alg::mirror_points_f(angle_e.to_radians(), &screen.points);
 
     let num_points = 10;
     let mut boards = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
@@ -66,6 +64,24 @@ fn virtual_boards() -> Vec<Vec<(f32, f32, f32)>> {
         }
     }
     boards.extend([screen_s, screen_e]);
+
+    let screen_s = vdrm_alg::mirror_points_f(90f32.to_radians(), &screen.points);
+    let p_s = Vector3::from(screen_s[0]);
+    let p_e = vec3(0., 1., 1.);
+    let p_dir = p_e - p_s;
+    println!("p_s: {:?}", p_s);
+    println!("p_e: {:?}", p_e);
+    println!("p_dir: {:?}", p_dir);
+
+    // 将 boards 里的点全部按照 p_dir 移动
+    for board in &mut boards {
+        for p in board {
+            p.0 += p_dir.x;
+            p.1 += p_dir.y;
+            p.2 += p_dir.z;
+        }
+    }
+
     boards
 }
 
@@ -182,7 +198,7 @@ fn main() {
         // 让正方形跟随模型一起旋转，但稍微向 Z 轴正向偏移一点，以免被完全埋在中间
         square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
         // 让虚拟板的线条跟随旋转
-        boards_model.set_transformation(rotation);
+        // boards_model.set_transformation(rotation);
 
         // 渲染到屏幕
         let screen = frame_input.screen();
