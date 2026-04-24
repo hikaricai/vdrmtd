@@ -108,27 +108,9 @@ fn main() {
     );
     let mut control = OrbitControl::new(*camera.target(), 10.0, 500.0);
 
-    // 2. 加载外部模型 (Taxi.obj) 代替内置球体
-    // 注意目录名是 asserts
-    // 我们必须一次性把模型、材质和贴图文件都提供给 loader，否则它可能找不到材质贴图
-    let mut loaded = three_d_asset::io::load(&[
-        "asserts/Taxi.obj",
-        "asserts/Taxi.mtl",
-        "asserts/Taxi.png"
-    ]).unwrap();
-    let mut cpu_model: CpuModel = loaded.deserialize("asserts/Taxi.obj").unwrap();
-    
-    // 修复由于某些 .obj 格式不规范导致没有绑定材质的问题
-    // 我们强制将所有的网格绑定到第一个材质（即 Taxi.mtl）
-    for primitive in cpu_model.geometries.iter_mut() {
-        primitive.material_index = Some(0);
-    }
-    
-    // PhysicalMaterial 必须要法线(normals)来计算光照，很多简单的 .obj 没有法线
-    // 所以我们需要在这里告诉 CPU 计算并补充所有的法线
-    for primitive in cpu_model.geometries.iter_mut() {
-        primitive.geometry.compute_normals();
-    }
+    // 2. 加载外部模型 (Taxi.glb)
+    // .glb 文件自带所有材质和贴图，不需要像 .obj 一样加载三个文件
+    let mut cpu_model: CpuModel = three_d_asset::io::load_and_deserialize("asserts/Taxi.glb").unwrap();
     
     // 我们不再对模型进行缩放，而是保持它的原始大小
     let mut model_aabb = AxisAlignedBoundingBox::EMPTY;
@@ -144,15 +126,17 @@ fn main() {
     let base_transform = Mat4::from_translation(-center);
     for primitive in cpu_model.geometries.iter_mut() {
         primitive.transformation = base_transform * primitive.transformation;
+        // .glb 通常带有法线，但为了以防万一还是调用一下 compute_normals
+        primitive.geometry.compute_normals();
     }
 
-    // 将 CpuModel 转为 GPU 渲染的 Model (使用 ColorMaterial，直接显示其贴图颜色，无视光照)
-    let mut model = Model::<ColorMaterial>::new(&context, &cpu_model).unwrap();
+    // 将 CpuModel 转为 GPU 渲染的 Model (使用 PhysicalMaterial，这样可以加载模型自带的纹理和材质)
+    let mut model = Model::<PhysicalMaterial>::new(&context, &cpu_model).unwrap();
 
     println!("Original Model Size: {:?}", size);
     println!("Max Size: {}", max_size);
 
-    // 重新添加光源 (如果不加光源，PhysicalMaterial 默认全黑，ColorMaterial 在无纹理时可能由于默认材质解析导致全白)
+    // 重新添加光源 (PhysicalMaterial 需要光照)
     let ambient = AmbientLight::new(&context, 0.5, Srgba::WHITE);
     let directional = DirectionalLight::new(&context, 2.0, Srgba::WHITE, &vec3(-1.0, -1.0, -1.0));
 
