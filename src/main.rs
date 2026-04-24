@@ -95,24 +95,23 @@ fn main() {
     let context = window.gl();
 
     // 1. 初始化相机 (使用正交相机，消除透视形变)
-    // 根据刚才加载 Taxi 输出的 Max Size (约 111.0)，我们把相机的距离和视口都按比例放大
-    let camera_distance = 150.0;
+    let camera_distance = 2.5;
     let mut camera = Camera::new_orthographic(
         window.viewport(),
         vec3(0.0, 0.0, camera_distance),
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
-        150.0, // height: 视口高度足够包裹 111.0 大小的模型
+        2.5, // height: 视口高度足够包裹 2.0 大小的模型
         0.1,
-        300.0, // far: 把远裁剪面调大，防止大模型被裁掉
+        10.0, // far: 恢复正常的远裁剪面
     );
-    let mut control = OrbitControl::new(*camera.target(), 10.0, 500.0);
+    let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
 
     // 2. 加载外部模型 (Taxi.glb)
     // .glb 文件自带所有材质和贴图，不需要像 .obj 一样加载三个文件
     let mut cpu_model: CpuModel = three_d_asset::io::load_and_deserialize("asserts/Taxi.glb").unwrap();
     
-    // 我们不再对模型进行缩放，而是保持它的原始大小
+    // 如果模型很大或很小，我们计算它的尺寸并将其缩放到我们固定的 2x2x2 盒子内 (也就是最大半径为 1)
     let mut model_aabb = AxisAlignedBoundingBox::EMPTY;
     for primitive in cpu_model.geometries.iter_mut() {
         model_aabb.expand_with_aabb(&primitive.geometry.compute_aabb());
@@ -120,18 +119,20 @@ fn main() {
     
     let size = model_aabb.size();
     let max_size = size.x.max(size.y).max(size.z);
+    let scale = 2.0 / max_size; // 让模型最长的一边刚好是 2.0
     
-    // 我们仅把模型平移到中心，方便旋转，但不改变其缩放比例
+    // 将模型平移到中心并应用缩放
     let center = model_aabb.center();
-    let base_transform = Mat4::from_translation(-center);
+    // 强制给模型计算法线 (PhysicalMaterial 渲染必须要有法线数据)
     for primitive in cpu_model.geometries.iter_mut() {
-        primitive.transformation = base_transform * primitive.transformation;
-        // .glb 通常带有法线，但为了以防万一还是调用一下 compute_normals
         primitive.geometry.compute_normals();
     }
-
-    // 将 CpuModel 转为 GPU 渲染的 Model (使用 PhysicalMaterial，这样可以加载模型自带的纹理和材质)
+    
+    // 由于 three-d-asset 加载的模型内部可能有各种层级变换，直接改几何体的矩阵有时不生效
+    // 我们选择先生成 Model，然后再统一给 Model 赋予变换
     let mut model = Model::<PhysicalMaterial>::new(&context, &cpu_model).unwrap();
+
+    let base_transform = Mat4::from_scale(scale) * Mat4::from_translation(-center);
 
     println!("Original Model Size: {:?}", size);
     println!("Max Size: {}", max_size);
@@ -166,7 +167,8 @@ fn main() {
     );
 
     // 用于记录模型当前的累积旋转和按键状态
-    let mut rotation = Mat4::identity();
+    // 初始化时直接给 rotation 赋这个基础的居中缩放变换，让后面的键盘增量旋转都在这个基础上进行
+    let mut rotation = base_transform;
     let mut keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
 
     // 3. 渲染循环
@@ -244,12 +246,12 @@ fn main() {
                 // 这会导致 min_z 和 max_z 发生改变，从而使得归一化深度随视角变化，边缘不再是 128！
 
                 // --- 采用固定相机空间深度的逻辑 ---
-                // 因为相机目前到 target (0,0,0) 的距离是 camera_distance (150.0)
-                // 模型的最大边长是 max_size (约 111.0)，半长(半径) 就是 max_size / 2.0
+                // 因为相机目前到 target (0,0,0) 的距离是 camera_distance (2.5)
+                // 模型缩放后的最大边长是 2.0，所以它的最大半径为 1.0
                 let distance_to_target = camera_distance; 
-                let model_radius = max_size / 2.0;
+                let model_radius = 1.0;
                 
-                // 我们以模型真实的半径范围去抓取深度
+                // 我们固定的体积显示器捕获深度范围：
                 let min_z = distance_to_target - model_radius;
                 let max_z = distance_to_target + model_radius;
 
