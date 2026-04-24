@@ -95,34 +95,66 @@ fn main() {
     let context = window.gl();
 
     // 1. 初始化相机 (使用正交相机，消除透视形变)
+    // 根据刚才加载 Taxi 输出的 Max Size (约 111.0)，我们把相机的距离和视口都按比例放大
+    let camera_distance = 150.0;
     let mut camera = Camera::new_orthographic(
         window.viewport(),
-        vec3(0.0, 0.0, 2.5),
+        vec3(0.0, 0.0, camera_distance),
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
-        5., // height: 因为球体直径是 2.0，所以视野高度设置为 2.5 就能完整包裹球体
+        150.0, // height: 视口高度足够包裹 111.0 大小的模型
         0.1,
-        10.0,
+        300.0, // far: 把远裁剪面调大，防止大模型被裁掉
     );
-    let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
+    let mut control = OrbitControl::new(*camera.target(), 10.0, 500.0);
 
-    // 2. 创建模型 (使用 Gm 和 Mesh)
-    let mesh = Mesh::new(&context, &CpuMesh::cube());
-    // 使用 ColorMaterial (无光照材质)，让模型每个地方都一样亮
-    let material = ColorMaterial::new_opaque(
-        &context,
-        &CpuMaterial {
-            albedo: Srgba::new_opaque(0, 150, 150),
-            ..Default::default()
-        },
-    );
-    let mut model = Gm::new(mesh, material);
+    // 2. 加载外部模型 (Taxi.obj) 代替内置球体
+    // 注意目录名是 asserts
+    // 我们必须一次性把模型、材质和贴图文件都提供给 loader，否则它可能找不到材质贴图
+    let mut loaded = three_d_asset::io::load(&[
+        "asserts/Taxi.obj",
+        "asserts/Taxi.mtl",
+        "asserts/Taxi.png"
+    ]).unwrap();
+    let mut cpu_model: CpuModel = loaded.deserialize("asserts/Taxi.obj").unwrap();
+    
+    // 修复由于某些 .obj 格式不规范导致没有绑定材质的问题
+    // 我们强制将所有的网格绑定到第一个材质（即 Taxi.mtl）
+    for primitive in cpu_model.geometries.iter_mut() {
+        primitive.material_index = Some(0);
+    }
+    
+    // PhysicalMaterial 必须要法线(normals)来计算光照，很多简单的 .obj 没有法线
+    // 所以我们需要在这里告诉 CPU 计算并补充所有的法线
+    for primitive in cpu_model.geometries.iter_mut() {
+        primitive.geometry.compute_normals();
+    }
+    
+    // 我们不再对模型进行缩放，而是保持它的原始大小
+    let mut model_aabb = AxisAlignedBoundingBox::EMPTY;
+    for primitive in cpu_model.geometries.iter_mut() {
+        model_aabb.expand_with_aabb(&primitive.geometry.compute_aabb());
+    }
+    
+    let size = model_aabb.size();
+    let max_size = size.x.max(size.y).max(size.z);
+    
+    // 我们仅把模型平移到中心，方便旋转，但不改变其缩放比例
+    let center = model_aabb.center();
+    let base_transform = Mat4::from_translation(-center);
+    for primitive in cpu_model.geometries.iter_mut() {
+        primitive.transformation = base_transform * primitive.transformation;
+    }
 
-    // 打印模型的包围盒(AABB)范围
-    let aabb = model.aabb();
-    println!("Model AABB Min: {:?}", aabb.min());
-    println!("Model AABB Max: {:?}", aabb.max());
-    println!("Model Size: {:?}", aabb.size());
+    // 将 CpuModel 转为 GPU 渲染的 Model (使用 ColorMaterial，直接显示其贴图颜色，无视光照)
+    let mut model = Model::<ColorMaterial>::new(&context, &cpu_model).unwrap();
+
+    println!("Original Model Size: {:?}", size);
+    println!("Max Size: {}", max_size);
+
+    // 重新添加光源 (如果不加光源，PhysicalMaterial 默认全黑，ColorMaterial 在无纹理时可能由于默认材质解析导致全白)
+    let ambient = AmbientLight::new(&context, 0.5, Srgba::WHITE);
+    let directional = DirectionalLight::new(&context, 2.0, Srgba::WHITE, &vec3(-1.0, -1.0, -1.0));
 
     // 添加一个平面正方形，默认 CpuMesh::square() 边长为 2.0 (halfsize=1.0)
     // 缩放 0.5 使得边长为 1.0
@@ -194,7 +226,9 @@ fn main() {
         // 将局部旋转累加到模型的总旋转中 
         // (右乘 delta_rot 表示基于当前的局部坐标轴继续旋转，而不是基于世界的固定坐标轴)
         rotation = rotation * delta_rot;
-        model.set_transformation(rotation);
+        for part in model.iter_mut() {
+            part.set_transformation(rotation);
+        }
         // 让正方形跟随模型一起旋转，但稍微向 Z 轴正向偏移一点，以免被完全埋在中间
         square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
         // 让虚拟板的线条跟随旋转
@@ -204,9 +238,8 @@ fn main() {
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
-            // 传入空的光源数组 &[]，因为 ColorMaterial 不需要光照
-            .render(&camera, model.into_iter().chain(&boards_model).chain(&axes), &[]);
-            // .render(&camera, model.into_iter().chain(&square).chain(&boards_model), &[]);
+            // 现在模型使用了 PhysicalMaterial，需要传入光源进行渲染
+            .render(&camera, model.into_iter().chain(&square).chain(&boards_model), &[&ambient, &directional]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
@@ -227,16 +260,14 @@ fn main() {
                 // 这会导致 min_z 和 max_z 发生改变，从而使得归一化深度随视角变化，边缘不再是 128！
 
                 // --- 采用固定相机空间深度的逻辑 ---
-                // 无论相机怎么转，我们希望捕捉的内容永远是位于相机正前方距离 target(原点) 为中心的 2x2x2 方块！
-                // 因为相机目前到 target (0,0,0) 的距离永远是 2.5
-                // 所以方块的前表面(最近点) 距离相机永远是 2.5 - 1.0 = 1.5
-                // 方块的后表面(最远点) 距离相机永远是 2.5 + 1.0 = 3.5
-                // (注意：这里使用相机的距离，而不是去读取 OrbitControl 内部状态，保持简单直接)
-                let distance_to_target = 2.5; // 初始化时我们设置了相机位置 vec3(0,0,2.5) 看向 0,0,0
+                // 因为相机目前到 target (0,0,0) 的距离是 camera_distance (150.0)
+                // 模型的最大边长是 max_size (约 111.0)，半长(半径) 就是 max_size / 2.0
+                let distance_to_target = camera_distance; 
+                let model_radius = max_size / 2.0;
                 
-                // 我们固定的体积显示器捕获深度范围：
-                let min_z = distance_to_target - 1.0;
-                let max_z = distance_to_target + 1.0;
+                // 我们以模型真实的半径范围去抓取深度
+                let min_z = distance_to_target - model_radius;
+                let max_z = distance_to_target + model_radius;
 
                 let mut min_z_raw = f32::MAX;
                 let mut max_z_raw = f32::MIN;
