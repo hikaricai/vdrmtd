@@ -107,6 +107,8 @@ fn main() {
     );
     let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
 
+    let camera_cl = camera.clone();
+    
     // 2. 加载外部模型 (Taxi.glb)
     // .glb 文件自带所有材质和贴图，不需要像 .obj 一样加载三个文件
     let mut cpu_model: CpuModel = three_d_asset::io::load_and_deserialize("asserts/Taxi.glb").unwrap();
@@ -182,6 +184,11 @@ fn main() {
         for event in frame_input.events.iter() {
             match event {
                 Event::KeyPress { kind, .. } => {
+                    if *kind == Key::Enter {
+                        camera = camera_cl.clone();
+                        control = OrbitControl::new(*camera.target(), 1.5, 5.0);
+                        break;
+                    }
                     keys.insert(*kind);
                 }
                 Event::KeyRelease { kind, .. } => {
