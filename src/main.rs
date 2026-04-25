@@ -101,7 +101,7 @@ fn main() {
         vec3(0.0, 0.0, camera_distance),
         vec3(0.0, 0.0, 0.0),
         vec3(0.0, 1.0, 0.0),
-        2.5, // height: 视口高度足够包裹 2.0 大小的模型
+        3.5, // height: 视口高度足够包裹 2.0 大小的模型
         0.1,
         10.0, // far: 恢复正常的远裁剪面
     );
@@ -143,16 +143,16 @@ fn main() {
 
     // 添加一个平面正方形，默认 CpuMesh::square() 边长为 2.0 (halfsize=1.0)
     // 缩放 0.5 使得边长为 1.0
-    let mut sq_mesh = CpuMesh::square();
-    sq_mesh.transform(&Mat4::from_scale(0.5)).unwrap();
-    let sq_material = ColorMaterial::new_transparent(
-        &context,
-        &CpuMaterial {
-            albedo: Srgba::new(255, 50, 50, 128), // 半透明红色 (alpha: 128)
-            ..Default::default()
-        },
-    );
-    let mut square = Gm::new(Mesh::new(&context, &sq_mesh), sq_material);
+    // let mut sq_mesh = CpuMesh::square();
+    // sq_mesh.transform(&Mat4::from_scale(0.5)).unwrap();
+    // let sq_material = ColorMaterial::new_transparent(
+    //     &context,
+    //     &CpuMaterial {
+    //         albedo: Srgba::new(255, 50, 50, 128), // 半透明红色 (alpha: 128)
+    //         ..Default::default()
+    //     },
+    // );
+    // let mut square = Gm::new(Mesh::new(&context, &sq_mesh), sq_material);
 
     // 创建坐标轴
     let axes = Axes::new(&context, 0.05, 2.0);
@@ -165,6 +165,7 @@ fn main() {
         0.01, // 线条粗细
         Srgba::new_opaque(0, 255, 0), // 绿色线条
     );
+    boards_model.set_transformation(Mat4::from_angle_z(degrees(180.)));
 
     // 用于记录模型当前的累积旋转和按键状态
     // 初始化时直接给 rotation 赋这个基础的居中缩放变换，让后面的键盘增量旋转都在这个基础上进行
@@ -216,7 +217,7 @@ fn main() {
             part.set_transformation(rotation);
         }
         // 让正方形跟随模型一起旋转，但稍微向 Z 轴正向偏移一点，以免被完全埋在中间
-        square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
+        // square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
         // 让虚拟板的线条跟随旋转
         // boards_model.set_transformation(rotation);
 
@@ -225,7 +226,7 @@ fn main() {
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
             // 现在模型使用了 PhysicalMaterial，需要传入光源进行渲染
-            .render(&camera, model.into_iter().chain(&square).chain(&boards_model), &[&ambient, &directional]);
+            .render(&camera, model.into_iter().chain(&boards_model), &[&ambient, &directional]);
 
         for event in frame_input.events.iter() {
             if let Event::KeyPress {
