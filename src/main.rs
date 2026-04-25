@@ -88,7 +88,7 @@ fn virtual_boards() -> Vec<Vec<(f32, f32, f32)>> {
 fn main() {
     let window = Window::new(WindowSettings {
         title: "RGBH Capture Tool".to_string(),
-        max_size: Some((720, 720)),
+        max_size: Some((384, 384)),
         ..Default::default()
     })
     .unwrap();
@@ -180,10 +180,14 @@ fn main() {
         camera.set_viewport(viewport);
         control.handle_events(&mut camera, &mut frame_input.events);
 
+        let mut space_pressed = false;
         // --- 收集按键状态 ---
         for event in frame_input.events.iter() {
             match event {
                 Event::KeyPress { kind, .. } => {
+                    if *kind == Key::Space {
+                        space_pressed = true;
+                    }
                     if *kind == Key::Enter {
                         camera = camera_cl.clone();
                         control = OrbitControl::new(*camera.target(), 1.5, 5.0);
@@ -228,17 +232,19 @@ fn main() {
         // 让虚拟板的线条跟随旋转
         // boards_model.set_transformation(rotation);
 
+        let objects: Box<dyn Iterator<Item = _>>= if !space_pressed {
+            Box::new(model.into_iter().chain(&boards_model))
+        } else {
+            Box::new(model.into_iter())
+        };
         // 渲染到屏幕
         let screen = frame_input.screen();
         screen
             .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
             // 现在模型使用了 PhysicalMaterial，需要传入光源进行渲染
-            .render(&camera, model.into_iter().chain(&boards_model), &[&ambient, &directional]);
+            .render(&camera, objects, &[&ambient, &directional]);
 
-        for event in frame_input.events.iter() {
-            if let Event::KeyPress {
-                kind: Key::Space, ..
-            } = event
+            if space_pressed
             {
                 // --- 0.17.0 正确的 API 路径 ---
                 // 在 0.17 中，必须指定泛型类型或者使用具体的 read_color 方法
@@ -303,7 +309,7 @@ fn main() {
                 println!("(near, far): {:?}", (near, far));
                 println!("(min_z_raw, max_z_raw): {:?}", (min_z_raw, max_z_raw));
             }
-        }
+        
         FrameOutput::default()
     });
 }
