@@ -240,7 +240,7 @@ fn main() {
         // 渲染到屏幕
         let screen = frame_input.screen();
         screen
-            .clear(ClearState::color_and_depth(0.1, 0.1, 0.1, 1.0, 1.0))
+            .clear(ClearState::color_and_depth(0.0, 0.0, 0.0, 1.0, 1.0))
             // 现在模型使用了 PhysicalMaterial，需要传入光源进行渲染
             .render(&camera, objects, &[&ambient, &directional]);
 
