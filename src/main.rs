@@ -16,11 +16,7 @@ fn create_lines(
             if length > 0.0001 {
                 let dir_n = dir / length;
                 // 计算从 X 轴正向到 dir_n 的旋转
-                let rot = Quat::from_arc(
-                    vec3(1.0, 0.0, 0.0),
-                    dir_n,
-                    Some(vec3(0.0, 1.0, 0.0)),
-                );
+                let rot = Quat::from_arc(vec3(1.0, 0.0, 0.0), dir_n, Some(vec3(0.0, 1.0, 0.0)));
                 let transform = Mat4::from_translation(p0)
                     * Mat4::from(rot)
                     * Mat4::from_nonuniform_scale(length, thickness, thickness);
@@ -88,7 +84,7 @@ fn virtual_boards() -> Vec<Vec<(f32, f32, f32)>> {
 fn main() {
     let window = Window::new(WindowSettings {
         title: "RGBH Capture Tool".to_string(),
-        max_size: Some((384, 384)),
+        max_size: Some((192, 192)),
         ..Default::default()
     })
     .unwrap();
@@ -108,28 +104,29 @@ fn main() {
     let mut control = OrbitControl::new(*camera.target(), 1.5, 5.0);
 
     let camera_cl = camera.clone();
-    
+
     // 2. 加载外部模型 (Taxi.glb)
     // .glb 文件自带所有材质和贴图，不需要像 .obj 一样加载三个文件
-    let mut cpu_model: CpuModel = three_d_asset::io::load_and_deserialize("asserts/Taxi.glb").unwrap();
-    
+    let mut cpu_model: CpuModel =
+        three_d_asset::io::load_and_deserialize("asserts/Taxi.glb").unwrap();
+
     // 如果模型很大或很小，我们计算它的尺寸并将其缩放到我们固定的 2x2x2 盒子内 (也就是最大半径为 1)
     let mut model_aabb = AxisAlignedBoundingBox::EMPTY;
     for primitive in cpu_model.geometries.iter_mut() {
         model_aabb.expand_with_aabb(&primitive.geometry.compute_aabb());
     }
-    
+
     let size = model_aabb.size();
     let max_size = size.x.max(size.y).max(size.z);
     let scale = 2.0 / max_size; // 让模型最长的一边刚好是 2.0
-    
+
     // 将模型平移到中心并应用缩放
     let center = model_aabb.center();
     // 强制给模型计算法线 (PhysicalMaterial 渲染必须要有法线数据)
     for primitive in cpu_model.geometries.iter_mut() {
         primitive.geometry.compute_normals();
     }
-    
+
     // 由于 three-d-asset 加载的模型内部可能有各种层级变换，直接改几何体的矩阵有时不生效
     // 我们选择先生成 Model，然后再统一给 Model 赋予变换
     let mut model = Model::<PhysicalMaterial>::new(&context, &cpu_model).unwrap();
@@ -164,7 +161,7 @@ fn main() {
     let mut boards_model = create_lines(
         &context,
         &board_paths,
-        0.01, // 线条粗细
+        0.01,                         // 线条粗细
         Srgba::new_opaque(0, 255, 0), // 绿色线条
     );
     boards_model.set_transformation(Mat4::from_angle_z(degrees(180.)));
@@ -173,7 +170,7 @@ fn main() {
     // 初始化时直接给 rotation 赋这个基础的居中缩放变换，让后面的键盘增量旋转都在这个基础上进行
     let mut rotation = base_transform;
     let mut keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
-
+    let mut z_mov = 0.0f32;
     // 3. 渲染循环
     window.render_loop(move |mut frame_input| {
         let viewport = frame_input.viewport;
@@ -209,30 +206,48 @@ fn main() {
         let mut d_yaw = 0.0_f32;
         let mut d_roll = 0.0_f32;
 
-        if keys.contains(&Key::W) { d_pitch += speed; } // 机头向上 (绕局部 X 轴)
-        if keys.contains(&Key::S) { d_pitch -= speed; } // 机头向下
-        if keys.contains(&Key::A) { d_yaw -= speed; }   // 机头向左 (绕局部 Y 轴)
-        if keys.contains(&Key::D) { d_yaw += speed; }   // 机头向右
-        if keys.contains(&Key::Q) { d_roll += speed; }  // 左倾翻滚 (绕局部 Z 轴)
-        if keys.contains(&Key::E) { d_roll -= speed; }  // 右倾翻滚
+        if keys.contains(&Key::W) {
+            d_pitch += speed;
+        } // 机头向上 (绕局部 X 轴)
+        if keys.contains(&Key::S) {
+            d_pitch -= speed;
+        } // 机头向下
+        if keys.contains(&Key::A) {
+            d_yaw -= speed;
+        } // 机头向左 (绕局部 Y 轴)
+        if keys.contains(&Key::D) {
+            d_yaw += speed;
+        } // 机头向右
+        if keys.contains(&Key::Q) {
+            d_roll += speed;
+        } // 左倾翻滚 (绕局部 Z 轴)
+        if keys.contains(&Key::E) {
+            d_roll -= speed;
+        } // 右倾翻滚
+        if keys.contains(&Key::I) {
+            z_mov += speed / 100.;
+        }
+        if keys.contains(&Key::K) {
+            z_mov -= speed / 100.;
+        }
 
         // 构造当前帧的局部旋转矩阵
         let delta_rot = Mat4::from_angle_y(degrees(d_yaw))
             * Mat4::from_angle_x(degrees(d_pitch))
             * Mat4::from_angle_z(degrees(d_roll));
 
-        // 将局部旋转累加到模型的总旋转中 
+        // 将局部旋转累加到模型的总旋转中
         // (右乘 delta_rot 表示基于当前的局部坐标轴继续旋转，而不是基于世界的固定坐标轴)
         rotation = rotation * delta_rot;
         for part in model.iter_mut() {
-            part.set_transformation(rotation);
+            part.set_transformation(Mat4::from_translation(Vector3::new(0., 0., z_mov)) * rotation);
         }
         // 让正方形跟随模型一起旋转，但稍微向 Z 轴正向偏移一点，以免被完全埋在中间
         // square.set_transformation(rotation * Mat4::from_translation(vec3(0.0, 0.0, 1.2)));
         // 让虚拟板的线条跟随旋转
         // boards_model.set_transformation(rotation);
 
-        let objects: Box<dyn Iterator<Item = _>>= if !space_pressed {
+        let objects: Box<dyn Iterator<Item = _>> = if !space_pressed {
             Box::new(model.into_iter().chain(&boards_model))
         } else {
             Box::new(model.into_iter())
@@ -244,72 +259,70 @@ fn main() {
             // 现在模型使用了 PhysicalMaterial，需要传入光源进行渲染
             .render(&camera, objects, &[&ambient, &directional]);
 
-            if space_pressed
-            {
-                // --- 0.17.0 正确的 API 路径 ---
-                // 在 0.17 中，必须指定泛型类型或者使用具体的 read_color 方法
-                let pixels = screen.read_color::<[u8; 4]>();
-                let depth_values = screen.read_depth();
+        if space_pressed {
+            // --- 0.17.0 正确的 API 路径 ---
+            // 在 0.17 中，必须指定泛型类型或者使用具体的 read_color 方法
+            let pixels = screen.read_color::<[u8; 4]>();
+            let depth_values = screen.read_depth();
 
-                // 计算线性深度 (H)
-                let near = camera.z_near();
-                let far = camera.z_far();
+            // 计算线性深度 (H)
+            let near = camera.z_near();
+            let far = camera.z_far();
 
-                // --- 移除通过 AABB 顶点转换求深度的逻辑 ---
-                // 因为如果将世界空间中的 AABB 转到相机空间，随着相机旋转，AABB 的投影在深度方向会拉长（对角线最长可达 2*sqrt(3)）
-                // 这会导致 min_z 和 max_z 发生改变，从而使得归一化深度随视角变化，边缘不再是 128！
+            // --- 移除通过 AABB 顶点转换求深度的逻辑 ---
+            // 因为如果将世界空间中的 AABB 转到相机空间，随着相机旋转，AABB 的投影在深度方向会拉长（对角线最长可达 2*sqrt(3)）
+            // 这会导致 min_z 和 max_z 发生改变，从而使得归一化深度随视角变化，边缘不再是 128！
 
-                // --- 采用固定相机空间深度的逻辑 ---
-                // 因为相机目前到 target (0,0,0) 的距离是 camera_distance (2.5)
-                // 模型缩放后的最大边长是 2.0，所以它的最大半径为 1.0
-                let distance_to_target = camera_distance; 
-                let model_radius = 1.0;
-                
-                // 我们固定的体积显示器捕获深度范围：
-                let min_z = distance_to_target - model_radius;
-                let max_z = distance_to_target + model_radius;
+            // --- 采用固定相机空间深度的逻辑 ---
+            // 因为相机目前到 target (0,0,0) 的距离是 camera_distance (2.5)
+            // 模型缩放后的最大边长是 2.0，所以它的最大半径为 1.0
+            let distance_to_target = camera_distance;
+            let model_radius = 1.0;
 
-                let mut min_z_raw = f32::MAX;
-                let mut max_z_raw = f32::MIN;
-                // 利用模型自身的 min_z 和 max_z 将深度归一化到 0-255
-                let mut h_data = Vec::with_capacity(depth_values.len());
-                for &z_raw in depth_values.iter() {
-                    if z_raw >= 0.9999 {
-                        h_data.push(0);
-                    } else {
-                        // 记录原始深度范围
-                        if z_raw < min_z_raw {
-                            min_z_raw = z_raw;
-                        }
-                        if z_raw > max_z_raw {
-                            max_z_raw = z_raw;
-                        }
-                        // 对于正交相机，深度 z_raw (0.0 到 1.0) 与真实的线性深度_raw深度_raw (0.0 到 1.0) 与真实的线性深度是正向的直接线性关系
-                        // z_raw = 0.0 对应 near 面，z_raw = 1.0 对应 far 面
-                        let z_linear = near + z_raw * (far - near);
+            // 我们固定的体积显示器捕获深度范围：
+            let min_z = distance_to_target - model_radius;
+            let max_z = distance_to_target + model_radius;
 
-                        // 动态归一化：球体最靠近相机的点映射为 255 (白)，最远点映射为 0 (黑)
-                        let normalized_depth = (z_linear - min_z) / (max_z - min_z);
-
-                        // 为了保证球的边缘 (即深度刚好在 min_z 和 max_z 的正中间时) 值为 128
-                        // 127.5 需要四舍五入
-                        let h_val =
-                            (255.0 * (1.0 - normalized_depth)).round().clamp(0.0, 255.0) as u8;
-
-                        h_data.push(h_val);
+            let mut min_z_raw = f32::MAX;
+            let mut max_z_raw = f32::MIN;
+            // 利用模型自身的 min_z 和 max_z 将深度归一化到 0-255
+            let mut h_data = Vec::with_capacity(depth_values.len());
+            for &z_raw in depth_values.iter() {
+                if z_raw >= 0.9999 {
+                    h_data.push(0);
+                } else {
+                    // 记录原始深度范围
+                    if z_raw < min_z_raw {
+                        min_z_raw = z_raw;
                     }
-                }
+                    if z_raw > max_z_raw {
+                        max_z_raw = z_raw;
+                    }
+                    // 对于正交相机，深度 z_raw (0.0 到 1.0) 与真实的线性深度_raw深度_raw (0.0 到 1.0) 与真实的线性深度是正向的直接线性关系
+                    // z_raw = 0.0 对应 near 面，z_raw = 1.0 对应 far 面
+                    let z_linear = near + z_raw * (far - near);
 
-                // 保存 RGBH 渲染图
-                save_rgbh(viewport.width, viewport.height, &pixels, &h_data);
-                // 添加采样保存深度的调用 (这里步长选 16，保证文本宽度适中)
-                save_depth_txt(viewport.width, viewport.height, &h_data, 16);
-                println!(">>> RGBH 图片和 txt 深度采样已生成！");
-                println!("(min_z, max_z): {:?}", (min_z, max_z));
-                println!("(near, far): {:?}", (near, far));
-                println!("(min_z_raw, max_z_raw): {:?}", (min_z_raw, max_z_raw));
+                    // 动态归一化：球体最靠近相机的点映射为 255 (白)，最远点映射为 0 (黑)
+                    let normalized_depth = (z_linear - min_z) / (max_z - min_z);
+
+                    // 为了保证球的边缘 (即深度刚好在 min_z 和 max_z 的正中间时) 值为 128
+                    // 127.5 需要四舍五入
+                    let h_val = (255.0 * (1.0 - normalized_depth)).round().clamp(0.0, 255.0) as u8;
+
+                    h_data.push(h_val);
+                }
             }
-        
+
+            // 保存 RGBH 渲染图
+            save_rgbh(viewport.width, viewport.height, &pixels, &h_data);
+            // 添加采样保存深度的调用 (这里步长选 16，保证文本宽度适中)
+            save_depth_txt(viewport.width, viewport.height, &h_data, 16);
+            println!(">>> RGBH 图片和 txt 深度采样已生成！");
+            println!("(min_z, max_z): {:?}", (min_z, max_z));
+            println!("(near, far): {:?}", (near, far));
+            println!("(min_z_raw, max_z_raw): {:?}", (min_z_raw, max_z_raw));
+        }
+
         FrameOutput::default()
     });
 }
@@ -342,15 +355,19 @@ fn save_rgbh(w: u32, h: u32, rgb_raw: &[[u8; 4]], h_raw: &[u8]) {
             let rgb_idx = (y * w + x) as usize;
             // 但是 read_depth() 并没有做 flip_y，它的(0,0)仍然在屏幕的左下角，需要手动翻转 Y
             let depth_idx = ((h - 1 - y) * w + x) as usize;
-            
+
             let r = rgb_raw[rgb_idx][0];
             let g = rgb_raw[rgb_idx][1];
             let b = rgb_raw[rgb_idx][2];
             let depth = h_raw[depth_idx];
-            
+
             canvas.put_pixel(x, y, Rgb([r, g, b]));
             canvas.put_pixel(x + w, y, Rgb([depth, depth, depth]));
         }
     }
-    canvas.save("output_rgbh.png").unwrap();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    let path = format!("output_rgbh_{}.png", ts.as_secs());
+    canvas.save(path).unwrap();
 }
