@@ -286,6 +286,7 @@ fn main() {
                     }
                 }
 
+                // 保存 RGBH 渲染图
                 save_rgbh(viewport.width, viewport.height, &pixels, &h_data);
                 // 添加采样保存深度的调用 (这里步长选 16，保证文本宽度适中)
                 save_depth_txt(viewport.width, viewport.height, &h_data, 16);
@@ -323,15 +324,18 @@ fn save_rgbh(w: u32, h: u32, rgb_raw: &[[u8; 4]], h_raw: &[u8]) {
     let mut canvas = RgbImage::new(w * 2, h);
     for y in 0..h {
         for x in 0..w {
-            let src_idx = ((h - 1 - y) * w + x) as usize;
-            // 0.17 read_color 返回 RGBA 数据
-            let r = rgb_raw[src_idx][0];
-            let g = rgb_raw[src_idx][1];
-            let b = rgb_raw[src_idx][2];
+            // three-d 0.17 版本的 read_color() 内部已经自动做了 flip_y，所以颜色数组的(0,0)是左上角
+            let rgb_idx = (y * w + x) as usize;
+            // 但是 read_depth() 并没有做 flip_y，它的(0,0)仍然在屏幕的左下角，需要手动翻转 Y
+            let depth_idx = ((h - 1 - y) * w + x) as usize;
+            
+            let r = rgb_raw[rgb_idx][0];
+            let g = rgb_raw[rgb_idx][1];
+            let b = rgb_raw[rgb_idx][2];
+            let depth = h_raw[depth_idx];
+            
             canvas.put_pixel(x, y, Rgb([r, g, b]));
-
-            let d = h_raw[src_idx];
-            canvas.put_pixel(x + w, y, Rgb([d, d, d]));
+            canvas.put_pixel(x + w, y, Rgb([depth, depth, depth]));
         }
     }
     canvas.save("output_rgbh.png").unwrap();
